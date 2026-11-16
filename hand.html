@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+<title>เกมโยงคำ ใช้มือ</title>
+<style>
+  * { box-sizing:border-box; -webkit-user-select:none; user-select:none; }
+  body { margin:0; height:100vh; overflow:hidden; font-family:sans-serif; background:#bfe6ff; touch-action:none; }
+  #cam { position:fixed; inset:0; width:100%; height:100%; object-fit:cover; transform:scaleX(-1); }
+  #top { position:fixed; top:0; left:0; right:0; padding:10px 12px; display:flex;
+         justify-content:space-between; align-items:center; z-index:3; }
+  #title, #score { background:#fff; border-radius:12px; padding:6px 12px; font-size:20px; }
+  #board { position:fixed; top:64px; bottom:80px; left:0; right:0; display:flex;
+           justify-content:space-between; padding:0 14px; z-index:2; }
+  .col { display:flex; flex-direction:column; justify-content:space-around; width:40%; }
+  .card { background:rgba(255,255,255,.88); border:4px solid #4fa3ff; border-radius:18px;
+          min-height:70px; display:flex; align-items:center; justify-content:center;
+          text-align:center; font-size:26px; padding:6px; }
+  .left .card { font-size:32px; }
+  .card.sel { border-color:#ffb400; background:rgba(255,245,200,.95); }
+  .card.ok { border-color:#2ecc71; background:rgba(220,255,230,.95); }
+  .card.bad { border-color:#ff5c5c; animation:shake .4s; }
+  @keyframes shake { 25%{transform:translateX(-8px)} 75%{transform:translateX(8px)} }
+  svg { position:fixed; inset:0; width:100%; height:100%; pointer-events:none; z-index:4; }
+  #cursor { position:fixed; width:56px; height:56px; margin:-28px 0 0 -28px; border-radius:50%;
+            pointer-events:none; z-index:5; display:none;
+            background:conic-gradient(#ffb400 calc(var(--p,0)*360deg), rgba(255,255,255,.5) 0); }
+  #cursor::after { content:"👆"; position:absolute; inset:8px; border-radius:50%; background:#fff;
+                   display:flex; align-items:center; justify-content:center; font-size:24px; }
+  #msg { position:fixed; bottom:0; left:0; right:0; height:80px; background:#fffbe8;
+         display:flex; align-items:center; justify-content:center; font-size:20px;
+         border-radius:20px 20px 0 0; z-index:3; padding:0 10px; text-align:center; }
+  button { font-size:22px; padding:12px 18px; border:none; border-radius:14px; background:#4fa3ff; color:#fff; }
+  #start { position:fixed; inset:0; z-index:9; border-radius:0; font-size:30px; }
+</style>
+</head>
+<body>
+<video id="cam" autoplay playsinline muted></video>
+<div id="top"><div id="title">เกมโยงคำ</div><div id="score">⭐ 0</div></div>
+<div id="board"><div class="col left" id="L"></div><div class="col right" id="R"></div></div>
+<svg id="lines"></svg>
+<div id="cursor"></div>
+<div id="msg">ชูนิ้วชี้ให้กล้องเห็น แล้วชี้ค้างไว้ที่ภาพ</div>
+<button id="start">▶ แตะเพื่อเริ่มเล่น<br><small>(วางมือถือตั้งไว้ แล้วใช้นิ้วชี้กลางอากาศ)</small></button>
+
+<script type="module">
+// ===== แก้เนื้อหาตรงนี้ได้เลย: [ซ้าย, ขวาที่ถูก] =====
+const rounds = [
+  { title:"สัตว์อยู่ที่ไหน", pairs:[["🐟","ในน้ำ"],["🐦","บนต้นไม้"],["🐄","ทุ่งหญ้า"],["🐫","ทะเลทราย"]] },
+  { title:"นับให้ถูก",      pairs:[["🍎🍎🍎","3"],["🍎🍎🍎🍎🍎","5"],["🍎🍎","2"],["🍎🍎🍎🍎","4"]] },
+  { title:"คำศัพท์อังกฤษ",  pairs:[["🐶","dog"],["🐱","cat"],["🐘","elephant"],["🐔","chicken"]] }
+];
+const HOLD_MS = 900;   // ต้องชี้ค้างนานกี่มิลลิวินาที
+// =====================================================
+
+import { FilesetResolver, HandLandmarker } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs";
+
+const $ = id => document.getElementById(id);
+const svg = $("lines"), video = $("cam"), cursor = $("cursor");
+let r = 0, score = 0, matched = [], sel = null, tempLine = null;
+
+function speak(t) {
+  try { const u = new SpeechSynthesisUtterance(t); u.lang = "th-TH";
+        speechSynthesis.cancel(); speechSynthesis.speak(u); } catch (e) {}
+}
+const shuffle = a => a.map(v => [Math.random(), v]).sort((x, y) => x[0] - y[0]).map(v => v[1]);
+function edge(el, side) {
+  const b = el.getBoundingClientRect();
+  return { x: side === "right" ? b.right : b.left, y: b.top + b.height / 2 };
+}
+function line(a, b, color) {
+  const l = document.createElementNS("http://www.w3.org/2000/svg", "line");
+  l.setAttribute("x1", a.x); l.setAttribute("y1", a.y);
+  l.setAttribute("x2", b.x); l.setAttribute("y2", b.y);
+  l.setAttribute("stroke", color); l.setAttribute("stroke-width", 7);
+  l.setAttribute("stroke-linecap", "round");
+  svg.appendChild(l); return l;
+}
+function redraw() {
+  svg.innerHTML = ""; tempLine = null;
+  matched.forEach(([a, b]) => line(edge(a, "right"), edge(b, "left"), "#2ecc71"));
+}
+function makeCard(text, i) {
+  const d = document.createElement("div");
+  d.className = "card"; d.textContent = text; d.dataset.i = i; return d;
+}
+
+function showRound() {
+  matched = []; sel = null; redraw();
+  $("L").innerHTML = ""; $("R").innerHTML = "";
+  if (r >= rounds.length) {
+    $("title").textContent = "จบเกม 🏆";
+    $("msg").innerHTML = `เก่งมาก! ได้ ${score} ดาว &nbsp;<button id="again">เล่นใหม่</button>`;
+    $("again").onclick = () => { r = 0; score = 0; $("score").textContent = "⭐ 0"; showRound(); };
+    speak(`เก่งมาก ได้ ${score} ดาว`);
+    return;
+  }
+  const round = rounds[r];
+  $("title").textContent = `ด่าน ${r + 1}: ${round.title}`;
+  $("msg").textContent = "ชี้ค้างที่ภาพซ้าย แล้วชี้ค้างที่คำขวาที่ถูก";
+  speak(round.title);
+  shuffle(round.pairs.map((p, i) => i)).forEach(i => $("L").appendChild(makeCard(round.pairs[i][0], i)));
+  shuffle(round.pairs.map((p, i) => i)).forEach(i => $("R").appendChild(makeCard(round.pairs[i][1], i)));
+  round.pairs.forEach(p => p.tries = 0);
+}
+
+function selectLeft(card) {
+  if (sel) sel.classList.remove("sel");
+  sel = card; card.classList.add("sel");
+  $("msg").textContent = "ดี! ต่อไปชี้ค้างที่คำทางขวา";
+}
+function tryMatch(card, target) {
+  card.classList.remove("sel"); sel = null; redraw();
+  const pair = rounds[r].pairs[card.dataset.i];
+  if (target.dataset.i === card.dataset.i) {
+    card.classList.add("ok"); target.classList.add("ok");
+    matched.push([card, target]); redraw();
+    if (pair.tries === 0) { score++; $("score").textContent = "⭐ " + score; }
+    $("msg").textContent = "ถูกต้อง เก่งมาก! 🎉"; speak("ถูกต้อง");
+    if (matched.length === rounds[r].pairs.length) {
+      $("msg").textContent = "ผ่านด่านแล้ว! 🎊"; speak("ผ่านด่านแล้ว เก่งมาก");
+      r++; setTimeout(showRound, 2000);
+    }
+  } else {
+    pair.tries++;
+    target.classList.add("bad"); setTimeout(() => target.classList.remove("bad"), 450);
+    $("msg").textContent = "ยังไม่ถูก ลองอีกครั้งนะ 💪"; speak("ลองอีกครั้งนะ");
+  }
+}
+
+// ----- ใช้นิ้วชี้กลางอากาศ: ชี้ค้างไว้จนวงกลมเต็ม -----
+let hoverEl = null, hoverStart = 0, cx = null, cy = null, lastSeen = 0;
+function handAt(x, y) {
+  lastSeen = performance.now();
+  cx = cx === null ? x : cx + (x - cx) * 0.5;      // ทำให้เคอร์เซอร์นิ่งขึ้น
+  cy = cy === null ? y : cy + (y - cy) * 0.5;
+  cursor.style.display = "block";
+  cursor.style.left = cx + "px"; cursor.style.top = cy + "px";
+
+  let el = document.elementFromPoint(cx, cy)?.closest(".card");
+  if (el && (el.classList.contains("ok") || (el.closest(".right") && !sel) || el === sel)) el = null;
+  if (el !== hoverEl) { hoverEl = el; hoverStart = performance.now(); }
+  const p = el ? Math.min((performance.now() - hoverStart) / HOLD_MS, 1) : 0;
+  cursor.style.setProperty("--p", p);
+
+  if (el && p >= 1) {
+    hoverEl = null;
+    if (el.closest(".left")) selectLeft(el); else tryMatch(sel, el);
+  }
+  if (sel) {
+    const from = edge(sel, "right");
+    if (!tempLine) tempLine = line(from, from, "#ffb400");
+    tempLine.setAttribute("x1", from.x); tempLine.setAttribute("y1", from.y);
+    tempLine.setAttribute("x2", cx); tempLine.setAttribute("y2", cy);
+  }
+}
+function handLost() {
+  if (performance.now() - lastSeen < 400) return;   // มือหายแป๊บเดียว ไม่ต้องเริ่มนับใหม่
+  cursor.style.display = "none"; hoverEl = null; cx = cy = null;
+}
+window.handAt = handAt;
+
+// ----- ยังใช้นิ้วลากบนจอได้เหมือนเดิม -----
+let drag = null;
+document.addEventListener("pointerdown", e => {
+  const card = e.target.closest(".left .card");
+  if (!card || card.classList.contains("ok")) return;
+  drag = { card, l: line(edge(card, "right"), { x: e.clientX, y: e.clientY }, "#ffb400") };
+});
+document.addEventListener("pointermove", e => {
+  if (drag) { drag.l.setAttribute("x2", e.clientX); drag.l.setAttribute("y2", e.clientY); }
+});
+document.addEventListener("pointerup", e => {
+  if (!drag) return;
+  const { card, l } = drag; drag = null; l.remove();
+  const t = document.elementFromPoint(e.clientX, e.clientY)?.closest(".right .card");
+  if (t && !t.classList.contains("ok")) tryMatch(card, t);
+});
+window.addEventListener("resize", redraw);
+
+// ----- เปิดกล้องหน้า + โหลดระบบจับมือ -----
+$("start").onclick = async () => {
+  $("start").remove();
+  showRound();
+  try {
+    video.srcObject = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" } });
+    await video.play();
+  } catch (e) { $("msg").textContent = "เปิดกล้องไม่ได้ ใช้นิ้วลากบนจอแทนได้นะ"; return; }
+
+  $("msg").textContent = "กำลังโหลดระบบจับมือ... รอสักครู่";
+  let hands;
+  try {
+    const vision = await FilesetResolver.forVisionTasks("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm");
+    const opts = d => ({ baseOptions: { modelAssetPath:
+      "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task",
+      delegate: d }, runningMode: "VIDEO", numHands: 1 });
+    try { hands = await HandLandmarker.createFromOptions(vision, opts("GPU")); }
+    catch (e) { hands = await HandLandmarker.createFromOptions(vision, opts("CPU")); }
+  } catch (e) { $("msg").textContent = "โหลดระบบจับมือไม่ได้ ใช้นิ้วลากบนจอแทนได้นะ"; return; }
+  $("msg").textContent = "ชูนิ้วชี้ให้กล้องเห็น แล้วชี้ค้างที่ภาพซ้าย";
+
+  let lastT = -1;
+  function loop() {
+    if (video.readyState >= 2 && video.currentTime !== lastT) {
+      lastT = video.currentTime;
+      const res = hands.detectForVideo(video, performance.now());
+      if (res.landmarks && res.landmarks.length) {
+        const tip = res.landmarks[0][8];                 // ปลายนิ้วชี้
+        const W = innerWidth, H = innerHeight;
+        const s = Math.max(W / video.videoWidth, H / video.videoHeight);
+        const offX = (W - video.videoWidth * s) / 2, offY = (H - video.videoHeight * s) / 2;
+        const x = W - (offX + tip.x * video.videoWidth * s);   // กลับซ้ายขวาเหมือนกระจก
+        const y = offY + tip.y * video.videoHeight * s;
+        handAt(x, y);
+      } else handLost();
+    }
+    requestAnimationFrame(loop);
+  }
+  loop();
+};
+</script>
+</body>
+</html>
