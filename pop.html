@@ -26,12 +26,13 @@
          display:flex; align-items:center; justify-content:center; font-size:20px; text-align:center;
          border-radius:20px 20px 0 0; padding:0 10px; }
   button { font-size:22px; padding:12px 18px; border:none; border-radius:14px; background:#4fa3ff; color:#fff; }
+  #camBtn { font-size:18px; padding:8px; background:#fff; color:#000; border-radius:12px; }
   #start { position:fixed; inset:0; z-index:9; border-radius:0; font-size:30px; }
 </style>
 </head>
 <body>
 <video id="cam" autoplay playsinline muted></video>
-<div id="top"><div id="q">เกมจิ้มฟองสบู่</div><span id="handIcon">☝️</span><span id="score">⭐0</span></div>
+<div id="top"><button id="camBtn">🔄📷</button><div id="q">เกมจิ้มฟองสบู่</div><span id="handIcon">☝️</span><span id="score">⭐0</span></div>
 <div id="finger"></div>
 <div id="msg">กำลังเตรียมเกม...</div>
 <button id="start">🫧 แตะเพื่อเริ่มเล่น<br><small>(วางมือถือตั้งไว้ แล้วใช้นิ้วชี้จิ้มฟองกลางอากาศ)</small></button>
@@ -162,12 +163,31 @@ function step(t) {
 }
 requestAnimationFrame(step);
 
+// ----- กล้อง: ปุ่ม 🔄📷 สลับไปกล้องตัวถัดไป (รวมกล้อง USB) -----
+let cams = [], camIdx = 0;
+async function openCam(stream) {
+  if (video.srcObject) video.srcObject.getTracks().forEach(t => t.stop());
+  video.srcObject = stream; await video.play();
+  cams = (await navigator.mediaDevices.enumerateDevices()).filter(d => d.kind === "videoinput");
+  const id = stream.getVideoTracks()[0].getSettings().deviceId;
+  camIdx = Math.max(0, cams.findIndex(c => c.deviceId === id));
+}
+async function useCam(i) {
+  try {
+    await openCam(await navigator.mediaDevices.getUserMedia({ video: { deviceId: { exact: cams[i].deviceId } } }));
+    $("msg").textContent = "ใช้กล้อง: " + (cams[camIdx].label || "กล้อง " + (camIdx + 1));
+  } catch (e) { $("msg").textContent = "เปิดกล้องตัวนี้ไม่ได้ กด 🔄📷 อีกครั้ง"; }
+}
+$("camBtn").onclick = () => { if (cams.length > 1) useCam((camIdx + 1) % cams.length); };
+
 // ----- เปิดกล้องหน้า + โหลดระบบจับมือ -----
 $("start").onclick = async () => {
   $("start").remove(); beep(true);
   try {
-    video.srcObject = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" } });
-    await video.play();
+    await openCam(await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" } }));
+    // ถ้ามีกล้องเสียบ USB อยู่ ให้เลือกกล้องนั้นก่อน
+    const ext = cams.find(c => !/front|back|หน้า|หลัง/i.test(c.label) && cams.length > 2);
+    if (ext) await useCam(cams.indexOf(ext));
   } catch (e) { $("msg").textContent = "เปิดกล้องไม่ได้ ลองกดอนุญาตกล้องแล้วรีเฟรช"; return; }
   $("msg").textContent = "กำลังโหลดระบบจับมือ... รอสักครู่";
   let hands;
