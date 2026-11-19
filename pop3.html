@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+<title>เกมจิ้มฟองสบู่</title>
+<style>
+  * { box-sizing:border-box; -webkit-user-select:none; user-select:none; }
+  body { margin:0; height:100vh; overflow:hidden; font-family:sans-serif; background:#bfe6ff; touch-action:none; }
+  #cam { position:fixed; inset:0; width:100%; height:100%; object-fit:cover; transform:scaleX(-1); }
+  #top { position:fixed; top:10px; left:10px; right:10px; z-index:3; display:flex; gap:6px; align-items:center; }
+  #q { flex:1; background:#fff; border-radius:16px; padding:10px; font-size:26px; text-align:center; font-weight:bold; }
+  #score, #handIcon { background:#fff; border-radius:12px; padding:8px 10px; font-size:20px; }
+  #handIcon { opacity:.35; } #handIcon.on { opacity:1; background:#c8ffd8; }
+  .bub { position:fixed; width:var(--d); height:var(--d); margin:calc(var(--d) / -2) 0 0 calc(var(--d) / -2); border-radius:50%; z-index:2;
+         display:flex; align-items:center; justify-content:center; font-size:24px; font-weight:bold; color:#123; text-align:center; line-height:1.1;
+         background:radial-gradient(circle at 30% 30%, #fff 0 12%, rgba(180,230,255,.85) 40%, rgba(80,170,255,.75));
+         border:3px solid rgba(255,255,255,.9); box-shadow:0 4px 12px rgba(0,0,0,.2); }
+  .bub.pop { animation:pop .35s forwards; }
+  .bub.bad { background:#ff8080; animation:pop .35s forwards; }
+  @keyframes pop { to { transform:scale(1.6); opacity:0; } }
+  #finger { position:fixed; width:34px; height:34px; margin:-17px 0 0 -17px; border-radius:50%; z-index:5;
+            background:rgba(255,200,0,.9); border:4px solid #fff; box-shadow:0 0 14px #ffb400;
+            pointer-events:none; display:none; }
+  #msg { position:fixed; bottom:0; left:0; right:0; height:70px; background:#fffbe8; z-index:3;
+         display:flex; align-items:center; justify-content:center; font-size:20px; text-align:center;
+         border-radius:20px 20px 0 0; padding:0 10px; }
+  button { font-size:22px; padding:12px 18px; border:none; border-radius:14px; background:#4fa3ff; color:#fff; }
+  #camBtn { font-size:18px; padding:8px; background:#fff; color:#000; border-radius:12px; }
+  #start { position:fixed; inset:0; z-index:9; border-radius:0; font-size:30px; }
+</style>
+</head>
+<body>
+<video id="cam" autoplay playsinline muted></video>
+<div id="top"><button id="camBtn">🔄📷</button><div id="q">เกมจิ้มฟองสบู่</div><span id="handIcon">☝️</span><span id="score">⭐0</span></div>
+<div id="finger"></div>
+<div id="msg">กำลังเตรียมเกม...</div>
+<button id="start">🫧 แตะเพื่อเริ่มเล่น<br><small>(วางมือถือตั้งไว้ แล้วใช้นิ้วชี้จิ้มฟองกลางอากาศ)</small></button>
+
+<script type="module">
+// ===== แก้คำถามตรงนี้ได้เลย: q = คำถาม, a = คำตอบที่ถูก, wrong = คำตอบผิด =====
+const questions = [
+  { q:"3 + 4 = ?",          a:"7",     wrong:["6","8","9"] },
+  { q:"10 − 6 = ?",         a:"4",     wrong:["3","5","6"] },
+  { q:"🍎🍎🍎🍎🍎 มีกี่ผล?",  a:"5",     wrong:["4","6","3"] },
+  { q:"🐶 ภาษาอังกฤษคือ?",   a:"dog",   wrong:["cat","pig","cow"] },
+  { q:"🐟 อาศัยอยู่ที่ไหน?",   a:"น้ำ",    wrong:["ต้นไม้","ทราย","ภูเขา"] },
+  { q:"2 × 5 = ?",          a:"10",    wrong:["7","12","25"] },
+  { q:"ตรงข้ามกับ \"ร้อน\"",   a:"หนาว",  wrong:["อุ่น","สูง","เร็ว"] },
+  { q:"🔺 คือรูปอะไร?",       a:"สามเหลี่ยม", wrong:["วงกลม","สี่เหลี่ยม"] },
+  { q:"🐱 ภาษาอังกฤษคือ?",   a:"cat",   wrong:["dog","rat","bat"] },
+  { q:"15 + 5 = ?",         a:"20",    wrong:["15","25","10"] }
+];
+const BUBBLES = 4;     // จำนวนฟองบนจอ
+const SPEED = 55;      // ความเร็วฟอง (ยิ่งมากยิ่งเร็ว)
+// ==========================================================================
+
+import { FilesetResolver, HandLandmarker } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs";
+
+const $ = id => document.getElementById(id);
+const video = $("cam"), finger = $("finger");
+let qi = 0, score = 0, bubbles = [], playing = false, fx = null, fy = null, lastSeen = 0, lastFrame = 0;
+let audio, size = 96;
+
+function speak(t) {
+  try { const u = new SpeechSynthesisUtterance(t); u.lang = "th-TH";
+        speechSynthesis.cancel(); speechSynthesis.speak(u); } catch (e) {}
+}
+function beep(good) {
+  try {
+    audio = audio || new (window.AudioContext || window.webkitAudioContext)();
+    const o = audio.createOscillator(), g = audio.createGain();
+    o.frequency.value = good ? 880 : 200; o.type = good ? "sine" : "square";
+    g.gain.setValueAtTime(.2, audio.currentTime); g.gain.exponentialRampToValueAtTime(.001, audio.currentTime + .3);
+    o.connect(g); g.connect(audio.destination); o.start(); o.stop(audio.currentTime + .3);
+  } catch (e) {}
+}
+const pick = a => a[Math.floor(Math.random() * a.length)];
+
+function spawn(b, startY) {
+  const Q = questions[qi];
+  const hasAnswer = bubbles.some(o => o !== b && o.alive && o.text === Q.a);
+  const shown = bubbles.filter(o => o !== b && o.alive).map(o => o.text);
+  const free = Q.wrong.filter(w => !shown.includes(w));
+  b.text = hasAnswer ? pick(free.length ? free : Q.wrong) : Q.a;
+  b.el.textContent = b.text;
+  b.el.className = "bub";
+  const laneW = innerWidth / BUBBLES;                     // แต่ละฟองมีช่องของตัวเอง ไม่ชนกัน
+  b.x = laneW * (b.lane + 0.5) + (Math.random() - 0.5) * Math.max(laneW - size, 0);
+  b.y = startY ?? innerHeight - 40;                      // โผล่จากด้านล่างจอ
+  b.v = SPEED * (0.7 + Math.random() * 0.6);
+  b.alive = true;
+}
+function newQuestion() {
+  bubbles.forEach(b => b.el.remove());
+  if (qi >= questions.length) {
+    playing = false;
+    $("q").textContent = "ชนะแล้ว 🏆";
+    $("msg").innerHTML = `เก่งมาก! ได้ ${score} ดาว &nbsp;<button id="again">เล่นใหม่</button>`;
+    $("again").onclick = () => { qi = 0; score = 0; $("score").textContent = "⭐0"; newQuestion(); };
+    speak(`เก่งมาก ได้ ${score} ดาว`);
+    return;
+  }
+  const Q = questions[qi];
+  $("q").textContent = Q.q;
+  $("msg").textContent = "ใช้นิ้วชี้ ☝️ จิ้มฟองที่มีคำตอบถูก";
+  speak(Q.q.replace("= ?", "เท่ากับเท่าไร").replace("−", "ลบ").replace("×", "คูณ"));
+  bubbles = [];
+  const H = innerHeight;
+  size = Math.min(110, innerWidth / BUBBLES - 8);
+  document.body.style.setProperty("--d", size + "px");
+  const order = [...Array(BUBBLES).keys()].sort(() => Math.random() - 0.5);
+  for (let i = 0; i < BUBBLES; i++) {
+    const b = { el: document.createElement("div"), lane: order[i] };
+    document.body.appendChild(b.el);
+    bubbles.push(b);
+    spawn(b, H * (0.3 + 0.45 * i / BUBBLES) + Math.random() * 40);
+  }
+  playing = true;
+}
+function popBubble(b) {
+  b.alive = false;
+  const Q = questions[qi];
+  if (b.text === Q.a) {
+    b.el.className = "bub pop"; beep(true);
+    score++; $("score").textContent = "⭐" + score;
+    $("msg").textContent = "ถูกต้อง เก่งมาก! 🎉"; speak("ถูกต้อง");
+    playing = false; qi++;
+    setTimeout(newQuestion, 1300);
+  } else {
+    b.el.className = "bub bad"; beep(false);
+    $("msg").textContent = "ยังไม่ใช่ ลองอีกครั้งนะ 💪"; speak("ลองอีกครั้ง");
+    setTimeout(() => { if (playing && questions[qi] === Q) spawn(b); }, 500);
+  }
+}
+
+// ----- นิ้วชี้กลางอากาศ -----
+function handAt(x, y) {
+  lastSeen = performance.now();
+  $("handIcon").classList.add("on");
+  fx = fx === null ? x : fx + (x - fx) * 0.6;
+  fy = fy === null ? y : fy + (y - fy) * 0.6;
+  finger.style.display = "block";
+  finger.style.left = fx + "px"; finger.style.top = fy + "px";
+}
+function handLost() {
+  if (performance.now() - lastSeen < 300) return;
+  $("handIcon").classList.remove("on");
+  finger.style.display = "none"; fx = fy = null;
+}
+window.handAt = handAt;
+
+function step(t) {
+  const dt = lastFrame ? Math.min((t - lastFrame) / 1000, 0.1) : 0; lastFrame = t;
+  if (playing) for (const b of bubbles) {
+    if (!b.alive) continue;
+    b.y -= b.v * dt;
+    if (b.y < 90) spawn(b);                                   // ลอยพ้นจอ → เกิดใหม่ด้านล่าง
+    b.el.style.left = b.x + "px"; b.el.style.top = b.y + "px";
+    if (fx !== null && Math.hypot(fx - b.x, fy - b.y) < size / 2 + 6) popBubble(b);   // นิ้วโดนฟอง
+  }
+  requestAnimationFrame(step);
+}
+requestAnimationFrame(step);
+
+// ----- กล้อง: ปุ่ม 🔄📷 สลับไปกล้องตัวถัดไป (รวมกล้อง USB) -----
+let cams = [], camIdx = 0;
+async function openCam(stream) {
+  if (video.srcObject) video.srcObject.getTracks().forEach(t => t.stop());
+  video.srcObject = stream; await video.play();
+  cams = (await navigator.mediaDevices.enumerateDevices()).filter(d => d.kind === "videoinput");
+  const id = stream.getVideoTracks()[0].getSettings().deviceId;
+  camIdx = Math.max(0, cams.findIndex(c => c.deviceId === id));
+}
+async function useCam(i) {
+  const c = cams[i];
+  // มือถือ Android เปิดกล้อง 2 ตัวพร้อมกันไม่ได้ → ปิดตัวเดิมก่อน
+  if (video.srcObject) video.srcObject.getTracks().forEach(t => t.stop());
+  video.srcObject = null;
+  try {
+    await openCam(await navigator.mediaDevices.getUserMedia({ video: { deviceId: { exact: c.deviceId } } }));
+    $("msg").textContent = `กล้อง ${camIdx + 1}/${cams.length}: ${cams[camIdx].label || "ไม่มีชื่อ"}`;
+  } catch (e) {
+    camIdx = i;
+    $("msg").textContent = `กล้อง ${i + 1}/${cams.length} (${c.label || "ไม่มีชื่อ"}) เปิดไม่ได้ [${e.name}] กด 🔄📷 ต่อ`;
+  }
+}
+$("camBtn").onclick = () => { if (cams.length > 1) useCam((camIdx + 1) % cams.length); };
+
+// ----- เปิดกล้องหน้า + โหลดระบบจับมือ -----
+$("start").onclick = async () => {
+  $("start").remove(); beep(true);
+  try {
+    await openCam(await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" } }));
+    // ถ้ามีกล้องเสียบ USB อยู่ ให้เลือกกล้องนั้นก่อน
+    const ext = cams.find(c => !/front|back|หน้า|หลัง/i.test(c.label) && cams.length > 2);
+    if (ext) await useCam(cams.indexOf(ext));
+  } catch (e) { $("msg").textContent = "เปิดกล้องไม่ได้ ลองกดอนุญาตกล้องแล้วรีเฟรช"; return; }
+  $("msg").textContent = "กำลังโหลดระบบจับมือ... รอสักครู่";
+  let hands;
+  try {
+    const vision = await FilesetResolver.forVisionTasks("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm");
+    const opts = d => ({ baseOptions: { modelAssetPath:
+      "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task",
+      delegate: d }, runningMode: "VIDEO", numHands: 1 });
+    try { hands = await HandLandmarker.createFromOptions(vision, opts("GPU")); }
+    catch (e) { hands = await HandLandmarker.createFromOptions(vision, opts("CPU")); }
+  } catch (e) { $("msg").textContent = "โหลดระบบจับมือไม่ได้ ลองรีเฟรชอีกครั้ง"; return; }
+  newQuestion();
+
+  let lastT = -1;
+  function loop() {
+    if (video.readyState >= 2 && video.currentTime !== lastT) {
+      lastT = video.currentTime;
+      const res = hands.detectForVideo(video, performance.now());
+      if (res.landmarks && res.landmarks.length) {
+        const tip = res.landmarks[0][8];                       // ปลายนิ้วชี้
+        const W = innerWidth, H = innerHeight;
+        const s = Math.max(W / video.videoWidth, H / video.videoHeight);
+        const offX = (W - video.videoWidth * s) / 2, offY = (H - video.videoHeight * s) / 2;
+        handAt(W - (offX + tip.x * video.videoWidth * s), offY + tip.y * video.videoHeight * s);
+      } else handLost();
+    }
+    requestAnimationFrame(loop);
+  }
+  loop();
+};
+</script>
+</body>
+</html>
