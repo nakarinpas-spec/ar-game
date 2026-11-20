@@ -1,0 +1,437 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+<title>เกม AR ป.3 (จอทีวี)</title>
+<style>
+  :root { --k:1; }
+  * { box-sizing:border-box; -webkit-user-select:none; user-select:none; }
+  body { margin:0; height:100vh; overflow:hidden; font-family:sans-serif; background:#bfe6ff; touch-action:none; }
+  #cam { position:fixed; inset:0; width:100%; height:100%; object-fit:cover; transform:scaleX(-1); }
+  #top { position:fixed; top:calc(8px * var(--k)); left:calc(8px * var(--k)); right:calc(8px * var(--k)); z-index:6; display:flex; gap:calc(6px * var(--k)); align-items:center; }
+  .chip { background:#fff; border-radius:calc(12px * var(--k)); padding:calc(8px * var(--k)) calc(10px * var(--k)); font-size:calc(20px * var(--k)); white-space:nowrap; }
+  #title { flex:1; text-align:center; font-weight:bold; font-size:calc(22px * var(--k)); overflow:hidden; text-overflow:ellipsis; }
+  #handIcon { opacity:.35; } #handIcon.on { opacity:1; background:#c8ffd8; }
+  #screen { position:fixed; top:calc(64px * var(--k)); bottom:calc(70px * var(--k)); left:0; right:0; z-index:2; display:flex;
+            flex-direction:column; align-items:center; justify-content:center; padding:calc(10px * var(--k)); gap:calc(14px * var(--k)); }
+  .tgt { background:rgba(255,255,255,.9); border:calc(4px * var(--k)) solid #4fa3ff; border-radius:calc(20px * var(--k)); cursor:pointer;
+         display:flex; align-items:center; justify-content:center; text-align:center; transition:transform .15s; }
+  .tgt.hov { transform:scale(1.07); border-color:#ffb400; }
+  .tgt.sel { border-color:#ffb400; background:rgba(255,245,200,.95); }
+  .tgt.ok { border-color:#2ecc71; background:rgba(220,255,230,.95); }
+  .tgt.off { opacity:.35; }
+  .tgt.ok.off { opacity:.85; }
+  .bad { animation:shake .4s; border-color:#ff5c5c !important; }
+  @keyframes shake { 25%{transform:translateX(calc(-8px * var(--k)))} 75%{transform:translateX(calc(8px * var(--k)))} }
+  .menu { display:flex; flex-wrap:wrap; gap:calc(16px * var(--k)); justify-content:center; }
+  .menu .tgt { width:min(calc(260px * var(--k)), 80vw); height:min(calc(170px * var(--k)), 22vh); flex-direction:column; font-size:calc(26px * var(--k)); font-weight:bold; }
+  .menu .tgt span { font-size:min(calc(56px * var(--k)), 7vh); }
+  .clue { background:rgba(255,255,255,.92); border-radius:calc(20px * var(--k)); padding:calc(10px * var(--k)) calc(18px * var(--k)); text-align:center; font-size:calc(28px * var(--k)); }
+  .clue b { display:block; font-size:min(calc(70px * var(--k)), 9vh); }
+  .slots { display:flex; gap:calc(10px * var(--k)); }
+  .slot { min-width:calc(110px * var(--k)); height:calc(70px * var(--k)); border:calc(4px * var(--k)) dashed #fff; border-radius:calc(16px * var(--k)); background:rgba(0,0,0,.25);
+          color:#fff; font-size:calc(32px * var(--k)); font-weight:bold; display:flex; align-items:center; justify-content:center; padding:0 calc(10px * var(--k)); }
+  .slot.full { background:#2ecc71; border-style:solid; }
+  .tiles { display:grid; grid-template-columns:repeat(4, auto); gap:calc(12px * var(--k)); }
+  .tiles .tgt { min-width:calc(120px * var(--k)); height:calc(80px * var(--k)); font-size:calc(32px * var(--k)); font-weight:bold; padding:0 calc(12px * var(--k)); }
+  .match { display:flex; justify-content:space-between; width:100%; max-width:calc(800px * var(--k)); height:100%; }
+  .col { display:flex; flex-direction:column; justify-content:space-around; width:40%; }
+  .col .tgt { min-height:calc(70px * var(--k)); font-size:calc(34px * var(--k)); font-weight:bold; }
+  .left .tgt { font-size:calc(50px * var(--k)); }
+  .bub { position:fixed; width:var(--d); height:var(--d); margin:calc(var(--d) / -2) 0 0 calc(var(--d) / -2); border-radius:50%; z-index:3;
+         display:flex; align-items:center; justify-content:center; font-size:calc(38px * var(--k)); font-weight:bold; color:#123; cursor:pointer;
+         background:radial-gradient(circle at 30% 30%, #fff 0 12%, rgba(180,230,255,.85) 40%, rgba(80,170,255,.75));
+         border:calc(3px * var(--k)) solid rgba(255,255,255,.9); box-shadow:0 calc(4px * var(--k)) calc(12px * var(--k)) rgba(0,0,0,.2); }
+  .bub.pop { animation:pop .35s forwards; } .bub.wrong { background:#ff8080; animation:pop .35s forwards; }
+  @keyframes pop { to { transform:scale(1.6); opacity:0; } }
+  .qbox { position:fixed; top:calc(64px * var(--k)); left:50%; transform:translateX(-50%); z-index:4; background:#fff; border-radius:calc(16px * var(--k));
+          padding:calc(8px * var(--k)) calc(22px * var(--k)); font-size:calc(40px * var(--k)); font-weight:bold; }
+  .endbtns { display:flex; gap:calc(16px * var(--k)); } .endbtns .tgt { width:calc(180px * var(--k)); height:calc(90px * var(--k)); font-size:calc(24px * var(--k)); font-weight:bold; }
+  .big { font-size:calc(40px * var(--k)); background:#fff; border-radius:calc(20px * var(--k)); padding:calc(16px * var(--k)) calc(26px * var(--k)); text-align:center; }
+  svg { position:fixed; inset:0; width:100%; height:100%; pointer-events:none; z-index:4; }
+  #cursor { position:fixed; width:calc(52px * var(--k)); height:calc(52px * var(--k)); margin:calc(-26px * var(--k)) 0 0 calc(-26px * var(--k)); border-radius:50%; z-index:8;
+            pointer-events:none; display:none;
+            background:conic-gradient(#ffb400 calc(var(--p,0)*360deg), rgba(255,255,255,.55) 0); }
+  #cursor::after { content:""; position:absolute; inset:calc(12px * var(--k)); border-radius:50%; background:#ffcc00; border:calc(3px * var(--k)) solid #fff; }
+  #msg { position:fixed; bottom:0; left:0; right:0; height:calc(70px * var(--k)); background:#fffbe8; z-index:6;
+         display:flex; align-items:center; justify-content:center; font-size:calc(24px * var(--k)); text-align:center;
+         border-radius:calc(20px * var(--k)) calc(20px * var(--k)) 0 0; padding:0 calc(10px * var(--k)); }
+  button { font-family:inherit; font-size:calc(20px * var(--k)); border:none; }
+  #start { position:fixed; inset:0; z-index:9; font-size:calc(30px * var(--k)); background:#4fa3ff; color:#fff; }
+  @media (max-width:600px) {
+    .col .tgt { font-size:22px; } .left .tgt { font-size:38px; } .bub { font-size:28px; } .clue { font-size:22px; } #msg { font-size:20px; }
+    .tiles { grid-template-columns:repeat(2, auto); }
+    .tiles .tgt { min-width:calc(130px * var(--k)); height:calc(70px * var(--k)); font-size:calc(28px * var(--k)); }
+    #title { font-size:calc(17px * var(--k)); } .chip { font-size:calc(17px * var(--k)); padding:calc(6px * var(--k)) calc(8px * var(--k)); }
+    .slot { min-width:calc(90px * var(--k)); height:calc(60px * var(--k)); font-size:calc(26px * var(--k)); }
+  }
+</style>
+</head>
+<body>
+<video id="cam" autoplay playsinline muted></video>
+<div id="top">
+  <button class="chip tgt" id="home">🏠</button>
+  <div class="chip" id="title">เกม AR ป.3</div>
+  <button class="chip tgt" id="sayBtn">🔊</button>
+  <button class="chip" id="camBtn">🔄📷</button>
+  <span class="chip" id="handIcon">☝️</span>
+  <span class="chip" id="score">⭐0</span>
+</div>
+<div id="screen"></div>
+<svg id="lines"></svg>
+<div id="cursor"></div>
+<div id="msg">กำลังเตรียมเกม...</div>
+<button id="start">▶ แตะเพื่อเริ่ม<br><small>เกม AR ป.3 : ภาษาไทย • คณิตศาสตร์ • English<br>เล่นด้วยนิ้วชี้กลางอากาศ ☝️</small></button>
+
+<script type="module">
+// ====================== แก้เนื้อหาตรงนี้ได้เลย ======================
+// ภาษาไทย ต่อคำ: emoji = ภาพ, hint = คำใบ้, parts = คำที่ต้องต่อตามลำดับ, extra = คำหลอก
+const THAI = [
+  { emoji:"🚂", hint:"ยานพาหนะวิ่งบนราง",     parts:["รถ","ไฟ"],       extra:["เรือ","บิน"] },
+  { emoji:"🧊", hint:"น้ำที่เย็นจนเป็นก้อน",    parts:["น้ำ","แข็ง"],     extra:["ร้อน","ตา"] },
+  { emoji:"🏫", hint:"สถานที่ไปเรียนหนังสือ",   parts:["โรง","เรียน"],    extra:["บ้าน","งาน"] },
+  { emoji:"✈️", hint:"บินอยู่บนท้องฟ้า",         parts:["เครื่อง","บิน"],  extra:["รถ","นก"] },
+  { emoji:"🏥", hint:"ไปหาหมอเมื่อป่วย",        parts:["โรง","พยาบาล"], extra:["ครัว","เรียน"] },
+  { emoji:"🌊", hint:"ทางน้ำขนาดใหญ่",          parts:["แม่","น้ำ"],       extra:["พ่อ","ฟ้า"] },
+  { emoji:"☀️", hint:"ส่องแสงตอนกลางวัน",       parts:["ดวง","อาทิตย์"], extra:["จันทร์","ดาว"] },
+  { emoji:"💡", hint:"ทำให้หลอดไฟสว่าง",        parts:["ไฟ","ฟ้า"],       extra:["น้ำ","ดิน"] }
+];
+// คณิตศาสตร์ ฟองสบู่: q = โจทย์, a = คำตอบถูก, wrong = คำตอบผิด
+const MATH = [
+  { q:"7 × 8 = ?",        a:"56",  wrong:["54","48","64"] },
+  { q:"6 × 9 = ?",        a:"54",  wrong:["45","56","63"] },
+  { q:"48 ÷ 6 = ?",       a:"8",   wrong:["6","7","9"] },
+  { q:"125 + 238 = ?",    a:"363", wrong:["353","373","263"] },
+  { q:"500 − 175 = ?",    a:"325", wrong:["335","375","425"] },
+  { q:"9 × 4 = ?",        a:"36",  wrong:["32","40","27"] },
+  { q:"63 ÷ 7 = ?",       a:"9",   wrong:["7","8","6"] },
+  { q:"1,000 − 450 = ?",  a:"550", wrong:["650","450","500"] },
+  { q:"12 × 5 = ?",       a:"60",  wrong:["50","65","70"] },
+  { q:"8 × 8 = ?",        a:"64",  wrong:["56","72","68"] }
+];
+// English โยงคำ: [ภาพ, คำศัพท์]
+const ENG = [
+  { title:"Animals", pairs:[["🐘","elephant"],["🦒","giraffe"],["🐒","monkey"],["🐰","rabbit"]] },
+  { title:"Food",    pairs:[["🍌","banana"],["🍇","grapes"],["🍉","watermelon"],["🥕","carrot"]] },
+  { title:"School",  pairs:[["📚","book"],["✏️","pencil"],["🎒","bag"],["📏","ruler"]] }
+];
+const HOLD_MS = 800;   // ชี้ค้างนานเท่าไรถึงจะเลือก (มิลลิวินาที)
+const SPEED = 50;      // ความเร็วฟองสบู่
+const BIG = 1.2;       // ขนาดตัวหนังสือบนจอใหญ่/ทีวี (1 = ปกติ, 1.5 = ใหญ่มาก)
+const SPEECH_RATE = 0.8;  // ความเร็วเสียงพูด (1 = ปกติ, 0.7 = ช้าลง)
+// ===================================================================
+
+import { FilesetResolver, HandLandmarker } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs";
+
+const $ = id => document.getElementById(id);
+const video = $("cam"), cursor = $("cursor"), screen = $("screen"), svg = $("lines");
+let mode = "menu", score = 0, step = 0, audio, K = 1, lastSay = ["", "th-TH"];
+function setScale() {     // ขยายทุกอย่างตามขนาดจอ: จอทีวีใหญ่ = ตัวหนังสือใหญ่
+  const W = innerWidth, H = innerHeight;
+  K = W < 600 ? 1 : Math.min(3, Math.max(1, Math.min(W / 900, H / 650)) * BIG);
+  document.documentElement.style.setProperty("--k", K);
+}
+setScale();
+window.addEventListener("resize", setScale);
+const shuffle = a => a.map(v => [Math.random(), v]).sort((x, y) => x[0] - y[0]).map(v => v[1]);
+const pick = a => a[Math.floor(Math.random() * a.length)];
+
+// เสียงพูด: ช้าลง ดังสุด และเลือกเสียงที่ชัดที่สุดในเครื่อง
+function voiceFor(lang) {
+  const vs = speechSynthesis.getVoices().filter(v => v.lang.replace("_", "-").startsWith(lang.slice(0, 2)));
+  return vs.find(v => /google/i.test(v.name)) || vs.find(v => /natural|online/i.test(v.name)) || vs[0];
+}
+function speak(t, lang = "th-TH", keep = false) {
+  try {
+    if (!keep) lastSay = [t, lang];
+    const u = new SpeechSynthesisUtterance(t); u.lang = lang;
+    u.rate = SPEECH_RATE; u.volume = 1; u.pitch = 1;
+    const v = voiceFor(lang); if (v) u.voice = v;
+    speechSynthesis.cancel(); speechSynthesis.speak(u);
+  } catch (e) {}
+}
+try { speechSynthesis.getVoices(); speechSynthesis.onvoiceschanged = () => speechSynthesis.getVoices(); } catch (e) {}
+const sayAgain = () => speak(lastSay[0], lastSay[1]);
+function beep(good) {
+  try {
+    audio = audio || new (window.AudioContext || window.webkitAudioContext)();
+    const o = audio.createOscillator(), g = audio.createGain();
+    o.frequency.value = good ? 880 : 200; o.type = good ? "sine" : "square";
+    g.gain.setValueAtTime(.2, audio.currentTime); g.gain.exponentialRampToValueAtTime(.001, audio.currentTime + .3);
+    o.connect(g); g.connect(audio.destination); o.start(); o.stop(audio.currentTime + .3);
+  } catch (e) {}
+}
+const msg = t => $("msg").textContent = t;
+const setScore = n => { score = n; $("score").textContent = "⭐" + n; };
+function el(tag, cls, html, parent) {
+  const e = document.createElement(tag); if (cls) e.className = cls; if (html != null) e.innerHTML = html;
+  (parent || screen).appendChild(e); return e;
+}
+// ปุ่มที่เลือกได้ด้วย "ชี้ค้าง" หรือคลิก
+function target(parent, html, cls, onPress) {
+  const e = el("div", "tgt " + (cls || ""), html, parent);
+  e._press = onPress; e.onclick = () => !e.classList.contains("off") && onPress(); return e;
+}
+function clearScreen() {
+  screen.innerHTML = ""; svg.innerHTML = ""; bubbles.forEach(b => b.el.remove()); bubbles = [];
+  document.querySelectorAll(".qbox").forEach(e => e.remove());
+}
+
+// ============================ เมนู ============================
+function showMenu() {
+  mode = "menu"; clearScreen(); setScore(0);
+  $("title").textContent = "เลือกวิชา";
+  msg("ชี้นิ้วค้างไว้ที่วิชาที่อยากเล่น ☝️");
+  speak("เลือกวิชาที่อยากเล่น");
+  const m = el("div", "menu");
+  target(m, "<span>📖</span>ภาษาไทย<br><small>ต่อคำ</small>", "", startThai);
+  target(m, "<span>🫧</span>คณิตศาสตร์<br><small>จิ้มฟองสบู่</small>", "", startMath);
+  target(m, "<span>🔤</span>English<br><small>โยงคำศัพท์</small>", "", startEng);
+}
+$("home")._press = showMenu; $("home").onclick = showMenu;
+$("sayBtn")._press = sayAgain; $("sayBtn").onclick = sayAgain;
+
+function showEnd(total, again) {
+  mode = "end"; clearScreen();
+  $("title").textContent = "จบเกม 🏆";
+  el("div", "big", `เก่งมาก! 🎉<br>ได้ ${score} / ${total} ดาว`);
+  const b = el("div", "endbtns");
+  target(b, "🔁 เล่นอีก", "", again);
+  target(b, "🏠 เมนู", "", showMenu);
+  msg("ชี้ค้างเพื่อเลือก"); speak(`เก่งมาก ได้ ${score} ดาว`);
+}
+
+// ======================= ภาษาไทย: ต่อคำ =======================
+let thaiOrder = [];
+function startThai() { mode = "thai"; setScore(0); step = 0; thaiOrder = shuffle(THAI); thaiRound(); }
+function thaiRound() {
+  clearScreen();
+  if (step >= thaiOrder.length) return showEnd(thaiOrder.length, startThai);
+  const Q = thaiOrder[step]; let filled = 0, mistakes = 0;
+  $("title").textContent = `📖 ต่อคำ ข้อ ${step + 1}/${thaiOrder.length}`;
+  el("div", "clue", `<b>${Q.emoji}</b>${Q.hint}`);
+  const slots = el("div", "slots");
+  const slotEls = Q.parts.map(() => el("div", "slot", "?", slots));
+  const tiles = el("div", "tiles");
+  shuffle([...Q.parts, ...Q.extra]).forEach(word => {
+    const t = target(tiles, word, "", () => {
+      if (t.classList.contains("off")) return;
+      if (word === Q.parts[filled]) {
+        t.classList.add("off"); slotEls[filled].textContent = word; slotEls[filled].classList.add("full");
+        filled++; beep(true);
+        if (filled === Q.parts.length) {
+          if (mistakes === 0) setScore(score + 1);
+          msg(`ถูกต้อง! "${Q.parts.join("")}" 🎉`); speak("ถูกต้อง " + Q.parts.join(""), "th-TH", true);
+          tiles.querySelectorAll(".tgt").forEach(x => x.classList.add("off"));
+          step++; setTimeout(thaiRound, 1800);
+        } else msg("ดีมาก! เลือกคำต่อไป");
+      } else {
+        mistakes++; beep(false); t.classList.add("bad"); setTimeout(() => t.classList.remove("bad"), 450);
+        msg("ยังไม่ใช่ ลองอีกครั้งนะ 💪"); speak("ลองอีกครั้ง", "th-TH", true);
+      }
+    });
+  });
+  msg("ชี้ค้างที่คำ เพื่อต่อให้เป็นคำใหม่ตามภาพ");
+  speak(Q.hint);
+}
+
+// ===================== คณิตศาสตร์: ฟองสบู่ =====================
+let bubbles = [], mathOrder = [], size = 96, mathLive = false, topLimit = 150;
+const LANES = 4;
+function startMath() { mode = "math"; setScore(0); step = 0; mathOrder = shuffle(MATH); mathRound(); }
+function mathRound() {
+  clearScreen(); mathLive = false;
+  if (step >= mathOrder.length) return showEnd(mathOrder.length, startMath);
+  const Q = mathOrder[step]; Q.miss = 0;
+  $("title").textContent = `🫧 คณิต ข้อ ${step + 1}/${mathOrder.length}`;
+  const qb = el("div", "qbox", Q.q, document.body);
+  msg("ใช้นิ้วชี้ ☝️ จิ้มฟองที่มีคำตอบถูก");
+  speak(Q.q.replace("= ?", "เท่ากับเท่าไร").replace("×", "คูณ").replace("÷", "หาร").replace("−", "ลบ").replace("+", "บวก"));
+  size = Math.min(110 * K, innerWidth / LANES - 10);
+  document.body.style.setProperty("--d", size + "px");
+  topLimit = qb.getBoundingClientRect().bottom + size / 2 + 6;   // ฟองไม่ลอยทับกล่องโจทย์
+  const lanes = shuffle([...Array(LANES).keys()]);
+  for (let i = 0; i < LANES; i++) {
+    const b = { el: el("div", "bub", "", document.body), lane: lanes[i] };
+    b.el.onclick = () => b.alive && popBubble(b);
+    bubbles.push(b);
+    spawn(b, Math.max(topLimit + 20, innerHeight * (0.35 + 0.4 * i / LANES)) + Math.random() * 40);
+  }
+  mathLive = true;
+}
+function spawn(b, y) {
+  const Q = mathOrder[step];
+  const others = bubbles.filter(o => o !== b && o.alive).map(o => o.text);
+  const free = Q.wrong.filter(w => !others.includes(w));
+  b.text = others.includes(Q.a) ? pick(free.length ? free : Q.wrong) : Q.a;
+  b.el.textContent = b.text; b.el.className = "bub";
+  const w = innerWidth / LANES;
+  b.x = w * (b.lane + .5) + (Math.random() - .5) * Math.max(w - size, 0);
+  b.y = y ?? innerHeight - 40; b.v = SPEED * (.7 + Math.random() * .6); b.alive = true;
+}
+function popBubble(b) {
+  if (!mathLive) return;
+  b.alive = false; const Q = mathOrder[step];
+  if (b.text === Q.a) {
+    b.el.className = "bub pop"; beep(true); mathLive = false;
+    if (Q.miss === 0) setScore(score + 1);
+    msg("ถูกต้อง เก่งมาก! 🎉"); speak("ถูกต้อง", "th-TH", true);
+    step++; setTimeout(mathRound, 1300);
+  } else {
+    Q.miss++; b.el.className = "bub wrong"; beep(false);
+    msg("ยังไม่ใช่ ลองอีกครั้งนะ 💪"); speak("ลองอีกครั้ง", "th-TH", true);
+    setTimeout(() => { if (mathLive && mathOrder[step] === Q) spawn(b); }, 500);
+  }
+}
+function moveBubbles(dt) {
+  if (mode !== "math" || !mathLive) return;
+  for (const b of bubbles) {
+    if (!b.alive) continue;
+    b.y -= b.v * dt;
+    if (b.y < topLimit) spawn(b);
+    b.el.style.left = b.x + "px"; b.el.style.top = b.y + "px";
+    if (cx !== null && Math.hypot(cx - b.x, cy - b.y) < size / 2 + 6) popBubble(b);
+  }
+}
+
+// ===================== English: โยงคำศัพท์ =====================
+let engSel = null, engMatched = [], engTotal = 0;
+function startEng() { mode = "eng"; setScore(0); step = 0; engTotal = ENG.reduce((n, r) => n + r.pairs.length, 0); engRound(); }
+function edge(e, side) { const b = e.getBoundingClientRect(); return { x: side === "r" ? b.right : b.left, y: b.top + b.height / 2 }; }
+function line(a, b, color) {
+  const l = document.createElementNS("http://www.w3.org/2000/svg", "line");
+  Object.entries({ x1:a.x, y1:a.y, x2:b.x, y2:b.y, stroke:color, "stroke-width":7 * K, "stroke-linecap":"round" })
+    .forEach(([k, v]) => l.setAttribute(k, v));
+  svg.appendChild(l); return l;
+}
+function engRedraw() { svg.innerHTML = ""; engMatched.forEach(([a, b]) => line(edge(a, "r"), edge(b, "l"), "#2ecc71")); }
+function engRound() {
+  clearScreen(); engSel = null; engMatched = [];
+  if (step >= ENG.length) return showEnd(engTotal, startEng);
+  const R = ENG[step];
+  $("title").textContent = `🔤 ${R.title} ${step + 1}/${ENG.length}`;
+  msg("ชี้ค้างที่ภาพ แล้วชี้ค้างที่คำศัพท์ที่ถูก");
+  speak(R.title, "en-US");
+  const box = el("div", "match");
+  const L = el("div", "col left", "", box), Rt = el("div", "col right", "", box);
+  R.pairs.forEach(p => p.miss = 0);
+  shuffle(R.pairs.map((p, i) => i)).forEach(i => {
+    const c = target(L, R.pairs[i][0], "", () => {
+      if (c.classList.contains("ok")) return;
+      engSel?.classList.remove("sel"); engSel = c; c.classList.add("sel");
+      msg("ดี! ต่อไปชี้ค้างที่คำศัพท์ทางขวา");
+    }); c.dataset.i = i;
+  });
+  shuffle(R.pairs.map((p, i) => i)).forEach(i => {
+    const w = target(Rt, R.pairs[i][1], "", () => {
+      if (!engSel || w.classList.contains("ok")) return;
+      const p = R.pairs[engSel.dataset.i];
+      if (engSel.dataset.i == i) {
+        engSel.classList.remove("sel"); engSel.classList.add("ok", "off"); w.classList.add("ok", "off");
+        engMatched.push([engSel, w]); engSel = null; engRedraw(); beep(true);
+        if (p.miss === 0) setScore(score + 1);
+        msg(`ถูกต้อง! ${R.pairs[i][1]} 🎉`); speak(R.pairs[i][1], "en-US", true);
+        if (engMatched.length === R.pairs.length) { step++; setTimeout(engRound, 1800); }
+      } else {
+        p.miss++; beep(false); w.classList.add("bad"); setTimeout(() => w.classList.remove("bad"), 450);
+        msg("ยังไม่ถูก ลองอีกครั้งนะ 💪"); speak("Try again", "en-US", true);
+      }
+    }); w.dataset.i = i;
+  });
+}
+window.addEventListener("resize", () => mode === "eng" && engRedraw());
+
+// ===================== นิ้วชี้กลางอากาศ =====================
+let cx = null, cy = null, lastSeen = 0, hoverEl = null, hoverStart = 0, lockEl = null, tempLine = null;
+function handAt(x, y) {
+  lastSeen = performance.now(); $("handIcon").classList.add("on");
+  cx = cx === null ? x : cx + (x - cx) * .55;
+  cy = cy === null ? y : cy + (y - cy) * .55;
+  cursor.style.display = "block"; cursor.style.left = cx + "px"; cursor.style.top = cy + "px";
+}
+function handLost() {
+  if (performance.now() - lastSeen < 350) return;
+  $("handIcon").classList.remove("on"); cursor.style.display = "none"; cx = cy = null;
+}
+window.handAt = handAt;
+function updateHover(now) {
+  let e = cx === null ? null : document.elementFromPoint(cx, cy)?.closest(".tgt");
+  if (e && e.classList.contains("off")) e = null;
+  if (e !== lockEl) lockEl = null;                 // ต้องเลื่อนนิ้วออกก่อนถึงจะเลือกซ้ำได้
+  if (e === lockEl) e = null;
+  if (e !== hoverEl) { hoverEl?.classList.remove("hov"); hoverEl = e; e?.classList.add("hov"); hoverStart = now; }
+  const p = e ? Math.min((now - hoverStart) / HOLD_MS, 1) : 0;
+  cursor.style.setProperty("--p", p);
+  if (e && p >= 1) { e.classList.remove("hov"); hoverEl = null; lockEl = e; e._press(); }
+  // เส้นสีเหลืองตอนเลือกภาพ English แล้ว
+  if (mode === "eng" && engSel && cx !== null) {
+    const f = edge(engSel, "r");
+    if (!tempLine || !tempLine.isConnected) tempLine = line(f, f, "#ffb400");
+    tempLine.setAttribute("x1", f.x); tempLine.setAttribute("y1", f.y);
+    tempLine.setAttribute("x2", cx); tempLine.setAttribute("y2", cy);
+  } else if (tempLine) { tempLine.remove(); tempLine = null; }
+}
+let lastFrame = 0;
+function frame(t) {
+  const dt = lastFrame ? Math.min((t - lastFrame) / 1000, .1) : 0; lastFrame = t;
+  moveBubbles(dt); updateHover(t);
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+
+// ===================== กล้อง =====================
+let cams = [], camIdx = 0;
+async function openCam(stream) {
+  if (video.srcObject) video.srcObject.getTracks().forEach(t => t.stop());
+  video.srcObject = stream; await video.play();
+  cams = (await navigator.mediaDevices.enumerateDevices()).filter(d => d.kind === "videoinput");
+  const id = stream.getVideoTracks()[0].getSettings().deviceId;
+  camIdx = Math.max(0, cams.findIndex(c => c.deviceId === id));
+}
+async function useCam(i) {
+  const c = cams[i];
+  if (video.srcObject) video.srcObject.getTracks().forEach(t => t.stop());
+  video.srcObject = null;
+  try {
+    await openCam(await navigator.mediaDevices.getUserMedia({ video: { deviceId: { exact: c.deviceId } } }));
+    msg(`กล้อง ${camIdx + 1}/${cams.length}: ${cams[camIdx].label || "ไม่มีชื่อ"}`);
+  } catch (e) { camIdx = i; msg(`กล้อง ${i + 1}/${cams.length} เปิดไม่ได้ [${e.name}] กด 🔄📷 ต่อ`); }
+}
+$("camBtn").onclick = () => { if (cams.length > 1) useCam((camIdx + 1) % cams.length); };
+
+$("start").onclick = async () => {
+  $("start").remove(); beep(true);
+  try {
+    await openCam(await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" } }));
+  } catch (e) { msg("เปิดกล้องไม่ได้ ลองกดอนุญาตกล้องแล้วรีเฟรช"); return; }
+  msg("กำลังโหลดระบบจับมือ... รอสักครู่");
+  let hands;
+  try {
+    const vision = await FilesetResolver.forVisionTasks("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm");
+    const opts = d => ({ baseOptions: { modelAssetPath:
+      "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task",
+      delegate: d }, runningMode: "VIDEO", numHands: 1 });
+    try { hands = await HandLandmarker.createFromOptions(vision, opts("GPU")); }
+    catch (e) { hands = await HandLandmarker.createFromOptions(vision, opts("CPU")); }
+  } catch (e) { showMenu(); msg("โหลดระบบจับมือไม่ได้ ใช้เมาส์คลิกแทนได้"); return; }
+  showMenu();
+  let lastT = -1;
+  (function loop() {
+    if (video.readyState >= 2 && video.currentTime !== lastT) {
+      lastT = video.currentTime;
+      const res = hands.detectForVideo(video, performance.now());
+      if (res.landmarks && res.landmarks.length) {
+        const tip = res.landmarks[0][8];                       // ปลายนิ้วชี้
+        const W = innerWidth, H = innerHeight;
+        const s = Math.max(W / video.videoWidth, H / video.videoHeight);
+        const offX = (W - video.videoWidth * s) / 2, offY = (H - video.videoHeight * s) / 2;
+        handAt(W - (offX + tip.x * video.videoWidth * s), offY + tip.y * video.videoHeight * s);
+      } else handLost();
+    }
+    requestAnimationFrame(loop);
+  })();
+};
+</script>
+</body>
+</html>
